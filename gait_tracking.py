@@ -4,11 +4,35 @@ from scipy.interpolate import interp1d
 import imufusion
 import matplotlib.pyplot as pyplot
 import numpy
+import scipy.spatial.transform.rotation as R
+
+def euler_to_rotation_matrix(roll, pitch, yaw):
+    # Convert angles from degrees to radians
+    roll = numpy.radians(roll)
+    pitch = numpy.radians(pitch)
+    yaw = numpy.radians(yaw)
+    
+    # Calculate rotation matrices
+    Rx = numpy.array([[1, 0, 0],
+                   [0, numpy.cos(roll), -numpy.sin(roll)],
+                   [0, numpy.sin(roll), numpy.cos(roll)]])
+    
+    Ry = numpy.array([[numpy.cos(pitch), 0, numpy.sin(pitch)],
+                   [0, 1, 0],
+                   [-numpy.sin(pitch), 0, numpy.cos(pitch)]])
+    
+    Rz = numpy.array([[numpy.cos(yaw), -numpy.sin(yaw), 0],
+                   [numpy.sin(yaw), numpy.cos(yaw), 0],
+                   [0, 0, 1]])
+    
+    # Combine the rotations
+    R = numpy.dot(Rz, numpy.dot(Ry, Rx))
+    return R
 
 # Import sensor data ("short_walk.csv" or "long_walk.csv")
-data = numpy.genfromtxt("short_walk.csv", delimiter=",", skip_header=1)
+data = numpy.genfromtxt("front_squat_convert.csv", delimiter=",", skip_header=1)
 
-sample_rate = 400  # 400 Hz
+sample_rate = 50  # 400 Hz
 
 timestamp = data[:, 0]
 gyroscope = data[:, 1:4]
@@ -89,6 +113,8 @@ axes[5].plot(timestamp, internal_states[:, 2], "tab:orange", label="Acceleration
 axes[5].set_xlabel("Seconds")
 axes[5].grid()
 axes[5].legend()
+
+pyplot.savefig("plot1.png")
 
 # Plot acceleration
 _, axes = pyplot.subplots(nrows=4, sharex=True, gridspec_kw={"height_ratios": [6, 1, 6, 6]})
@@ -198,6 +224,10 @@ axes[3].set_ylabel("m")
 axes[3].grid()
 axes[3].legend()
 
+# write the plot to a file
+pyplot.savefig("plot.png")
+
+
 # Print error as distance between start and final positions
 print("Error: " + "{:.3f}".format(numpy.sqrt(position[-1].dot(position[-1]))) + " m")
 
@@ -216,33 +246,52 @@ if True:
 
     scatter = axes.scatter(x, y, z)
 
-    fps = 30
-    samples_per_frame = int(sample_rate / fps)
+    fps = 25
+    samples_per_frame = int(sample_rate / 2)
 
+    # Calculate global minima and maxima for x, y, z
+    x_min, x_max = numpy.min(position[:, 0]), numpy.max(position[:, 0])
+    y_min, y_max = numpy.min(position[:, 1]), numpy.max(position[:, 1])
+    z_min, z_max = numpy.min(position[:, 2]), numpy.max(position[:, 2])
+
+    # Set fixed scope for the animation
+    axes.set_xlim3d(x_min, x_max)
+    axes.set_ylim3d(y_min, y_max)
+    axes.set_zlim3d(z_min, z_max)
+
+    # Assuming your axes aspect ratio setup is necessary for the visual, but you can adjust it to fit the fixed scope better if needed
+    axes.set_box_aspect((numpy.ptp(position[:, 0]), numpy.ptp(position[:, 1]), numpy.ptp(position[:, 2])))
+
+    # Update function modification: remove dynamic scope adjustment
     def update(frame):
         index = frame * samples_per_frame
-
         axes.set_title("{:.3f}".format(timestamp[index]) + " s")
-
         x.append(position[index, 0])
         y.append(position[index, 1])
         z.append(position[index, 2])
 
+        # Clear previous orientation lines
+        while len(axes.lines) > 0:
+            axes.lines[0].remove()
+
+        # Current orientation represented as a rotation matrix
+        rotation_matrix = euler_to_rotation_matrix(euler[index, 0], euler[index, 1], euler[index, 2])
+
+        # Origin of the orientation vectors
+        origin = position[index, :]
+
+        # Draw new orientation lines
+        for axis, color in zip(rotation_matrix, ['r', 'g', 'b']):
+            axes.quiver(*origin, *axis, length=0.1, color=color)
+
         scatter._offsets3d = (x, y, z)
-
-        if (min(x) != max(x)) and (min(y) != max(y)) and (min(z) != max(z)):
-            axes.set_xlim3d(min(x), max(x))
-            axes.set_ylim3d(min(y), max(y))
-            axes.set_zlim3d(min(z), max(z))
-
-            axes.set_box_aspect((numpy.ptp(x), numpy.ptp(y), numpy.ptp(z)))
-
+        print("Frame: " + str(frame) + " / " + str(int(len(timestamp) / samples_per_frame)))
         return scatter
 
     anim = animation.FuncAnimation(figure, update,
-                                   frames=int(len(timestamp) / samples_per_frame),
-                                   interval=1000 / fps,
-                                   repeat=False)
+                                frames=int(len(timestamp) / samples_per_frame),
+                                interval=1000 / fps,
+                                repeat=False)
 
     anim.save("animation.gif", writer=animation.PillowWriter(fps))
 
