@@ -5,7 +5,7 @@ output_filename = 'front_squat_convert.csv'
 
 df = pd.read_csv(input_filename, skiprows=1)  # Skip the first row (header)
 
-sensor_id_suffix = 340
+sensor_id_suffix = 1744
 df_sensor1 = df[df['sensor'] == sensor_id_suffix]
 
 # Convert timestamps to relative time in seconds from the first timestamp

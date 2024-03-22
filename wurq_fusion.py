@@ -1,7 +1,5 @@
 from dataclasses import dataclass
 from matplotlib import animation
-from scipy.interpolate import interp1d
-import imufusion
 import matplotlib.pyplot as pyplot
 import numpy
 import scipy.spatial.transform.rotation as R
@@ -9,9 +7,9 @@ import scipy.signal
 
 def euler_to_rotation_matrix(roll, pitch, yaw):
     # Convert angles from degrees to radians
-    roll = numpy.radians(roll)
-    pitch = numpy.radians(pitch)
-    yaw = numpy.radians(yaw)
+    # roll = numpy.radians(roll)
+    # pitch = numpy.radians(pitch)
+    # yaw = numpy.radians(yaw)
     
     # Calculate rotation matrices
     Rx = numpy.array([[1, 0, 0],
@@ -31,13 +29,24 @@ def euler_to_rotation_matrix(roll, pitch, yaw):
     return R
 
 # Import sensor data ("short_walk.csv" or "long_walk.csv")
-data = numpy.genfromtxt("front_squat_convert.csv", delimiter=",", skip_header=1)
+data = numpy.genfromtxt("front_squat.csv", delimiter=",", skip_header=1)
 
 sample_rate = 50  # 50 Hz
 
-timestamp = data[:, 0]
-gyroscope = data[:, 1:4]
-accelerometer = data[:, 4:7]
+timestamp = data[:, 0] / 1e6  # convert from microseconds to seconds
+gyroscope = data[:, 7:10]
+acceleration = data[:, 1:4] / 9.81  # convert from m/s/s to g
+euler = data[:, 21:24]
+
+# Current orientation represented as a rotation matrix
+
+rotation_matrix = numpy.zeros((len(timestamp), 3, 3))
+
+for index in range(len(timestamp)):
+    roll = euler[index, 0]
+    pitch = euler[index, 1]
+    yaw = euler[index, 2]
+    rotation_matrix[index] = euler_to_rotation_matrix(roll, pitch, yaw)
 
 # Plot sensor data
 figure, axes = pyplot.subplots(nrows=6, sharex=True, gridspec_kw={"height_ratios": [6, 6, 6, 2, 1, 1]})
@@ -51,44 +60,17 @@ axes[0].set_ylabel("Degrees/s")
 axes[0].grid()
 axes[0].legend()
 
-axes[1].plot(timestamp, accelerometer[:, 0], "tab:red", label="Accelerometer X")
-axes[1].plot(timestamp, accelerometer[:, 1], "tab:green", label="Accelerometer Y")
-axes[1].plot(timestamp, accelerometer[:, 2], "tab:blue", label="Accelerometer Z")
+axes[1].plot(timestamp, acceleration[:, 0], "tab:red", label="Accelerometer X")
+axes[1].plot(timestamp, acceleration[:, 1], "tab:green", label="Accelerometer Y")
+axes[1].plot(timestamp, acceleration[:, 2], "tab:blue", label="Accelerometer Z")
 axes[1].set_ylabel("g")
 axes[1].grid()
 axes[1].legend()
 
-# Instantiate AHRS algorithms
-offset = imufusion.Offset(sample_rate)
-ahrs = imufusion.Ahrs()
-
-ahrs.settings = imufusion.Settings(imufusion.CONVENTION_NWU,
-                                   0.5,  # gain
-                                   2000,  # gyroscope range
-                                   10,  # acceleration rejection
-                                   0,  # magnetic rejection
-                                   5 * sample_rate)  # rejection timeout = 5 seconds
 
 # Process sensor data
 delta_time = numpy.diff(timestamp, prepend=timestamp[0])
 
-euler = numpy.empty((len(timestamp), 3))
-internal_states = numpy.empty((len(timestamp), 3))
-acceleration = numpy.empty((len(timestamp), 3))
-
-for index in range(len(timestamp)):
-    gyroscope[index] = offset.update(gyroscope[index])
-
-    ahrs.update_no_magnetometer(gyroscope[index], accelerometer[index], delta_time[index])
-
-    euler[index] = ahrs.quaternion.to_euler()
-
-    ahrs_internal_states = ahrs.internal_states
-    internal_states[index] = numpy.array([ahrs_internal_states.acceleration_error,
-                                          ahrs_internal_states.accelerometer_ignored,
-                                          ahrs_internal_states.acceleration_recovery_trigger])
-
-    acceleration[index] = 9.81 * ahrs.earth_acceleration  # convert g to m/s/s
 
 # Plot Euler angles
 axes[2].plot(timestamp, euler[:, 0], "tab:red", label="Roll")
@@ -98,27 +80,10 @@ axes[2].set_ylabel("Degrees")
 axes[2].grid()
 axes[2].legend()
 
-# Plot internal states
-axes[3].plot(timestamp, internal_states[:, 0], "tab:olive", label="Acceleration error")
-axes[3].set_ylabel("Degrees")
-axes[3].grid()
-axes[3].legend()
-
-axes[4].plot(timestamp, internal_states[:, 1], "tab:cyan", label="Accelerometer ignored")
-pyplot.sca(axes[4])
-pyplot.yticks([0, 1], ["False", "True"])
-axes[4].grid()
-axes[4].legend()
-
-axes[5].plot(timestamp, internal_states[:, 2], "tab:orange", label="Acceleration recovery trigger")
-axes[5].set_xlabel("Seconds")
-axes[5].grid()
-axes[5].legend()
-
 pyplot.savefig("plot1.png")
 
 # Plot acceleration
-_, axes = pyplot.subplots(nrows=4, sharex=True, gridspec_kw={"height_ratios": [6, 1, 6, 6]})
+_, axes = pyplot.subplots(nrows=3, sharex=True, gridspec_kw={"height_ratios": [6, 6, 6]})
 
 axes[0].plot(timestamp, acceleration[:, 0], "tab:red", label="X")
 axes[0].plot(timestamp, acceleration[:, 1], "tab:green", label="Y")
@@ -148,13 +113,13 @@ velocity[:, 1] = butter_highpass_filter(velocity[:, 1], 0.1, sample_rate)
 velocity[:, 2] = butter_highpass_filter(velocity[:, 2], 0.1, sample_rate)
 
 # Plot velocity
-axes[2].plot(timestamp, velocity[:, 0], "tab:red", label="X")
-axes[2].plot(timestamp, velocity[:, 1], "tab:green", label="Y")
-axes[2].plot(timestamp, velocity[:, 2], "tab:blue", label="Z")
-axes[2].set_title("Velocity")
-axes[2].set_ylabel("m/s")
-axes[2].grid()
-axes[2].legend()
+axes[1].plot(timestamp, velocity[:, 0], "tab:red", label="X")
+axes[1].plot(timestamp, velocity[:, 1], "tab:green", label="Y")
+axes[1].plot(timestamp, velocity[:, 2], "tab:blue", label="Z")
+axes[1].set_title("Velocity")
+axes[1].set_ylabel("m/s")
+axes[1].grid()
+axes[1].legend()
 
 # Calculate position
 position = numpy.zeros((len(timestamp), 3))
@@ -163,14 +128,14 @@ for index in range(len(timestamp)):
     position[index] = position[index - 1] + delta_time[index] * velocity[index]
 
 # Plot position
-axes[3].plot(timestamp, position[:, 0], "tab:red", label="X")
-axes[3].plot(timestamp, position[:, 1], "tab:green", label="Y")
-axes[3].plot(timestamp, position[:, 2], "tab:blue", label="Z")
-axes[3].set_title("Position")
-axes[3].set_xlabel("Seconds")
-axes[3].set_ylabel("m")
-axes[3].grid()
-axes[3].legend()
+axes[2].plot(timestamp, position[:, 0], "tab:red", label="X")
+axes[2].plot(timestamp, position[:, 1], "tab:green", label="Y")
+axes[2].plot(timestamp, position[:, 2], "tab:blue", label="Z")
+axes[2].set_title("Position")
+axes[2].set_xlabel("Seconds")
+axes[2].set_ylabel("m")
+axes[2].grid()
+axes[2].legend()
 
 # write the plot to a file
 pyplot.savefig("plot.png")
@@ -194,7 +159,7 @@ if True:
 
     scatter = axes.scatter(x, y, z)
 
-    fps = 2
+    fps = 5
     samples_per_frame = int(sample_rate / fps)
 
     # Calculate global minima and maxima for x, y, z
